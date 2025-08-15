@@ -11,11 +11,11 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { authMiddleware, requireManager, JWT_SECRET } = require('./middleware');
-
 // --- Configuration ---
 const app = express();
 const PORT = process.env.PORT || 5000;
+// IMPORTANT: Use a strong, secret key and store it in environment variables for production.
+const JWT_SECRET = 'your_super_secret_jwt_key_that_is_long_and_random';
 
 // PostgreSQL connection configuration
 const pool = new Pool({
@@ -29,6 +29,29 @@ const pool = new Pool({
 // --- Middleware ---
 app.use(cors());
 app.use(bodyParser.json());
+
+// Authentication Middleware
+const authMiddleware = (req, res, next) => {
+  const token = req.header('x-auth-token');
+  if (!token) {
+    return res.status(401).json({ msg: 'No token, authorization denied' });
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded.user;
+    next();
+  } catch (err) {
+    res.status(401).json({ msg: 'Token is not valid' });
+  }
+};
+
+// Manager Role Middleware
+const requireManager = (req, res, next) => {
+  if (req.user.role !== 'manager') {
+    return res.status(403).json({ msg: 'Access denied. Managers only.' });
+  }
+  next();
+};
 
 
 // --- Authentication Routes ---
@@ -62,7 +85,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     } catch (err) {
         console.error(err.message);
-        res.status(500).send('Server error');
+        res.status(500).json({ msg: 'Server error' });
     }
 });
 
@@ -93,7 +116,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     } catch (err) {
         console.error(err.message);
-        res.status(500).send('Server error');
+        res.status(500).json({ msg: 'Server error' });
     }
 });
 
@@ -117,7 +140,7 @@ app.get('/api/entries', authMiddleware, async (req, res) => {
     res.json(allEntries.rows);
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ msg: 'Server Error' });
   }
 });
 
@@ -143,7 +166,7 @@ app.post('/api/entries', authMiddleware, async (req, res) => {
 
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ msg: 'Server Error' });
   }
 });
 
@@ -152,6 +175,24 @@ app.post('/api/entries', authMiddleware, async (req, res) => {
 
 
 // --- Manager Routes ---
+
+/**
+ * @route   GET /api/managers
+ * @desc    Get all managers for employee registration
+ * @access  Public
+ */
+app.get('/api/managers', async (req, res) => {
+    try {
+        const managers = await pool.query(
+            "SELECT id, full_name, email FROM users WHERE role = 'manager' ORDER BY full_name",
+            []
+        );
+        res.json(managers.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server error' });
+    }
+});
 
 /**
  * @route   GET /api/manager/approvals
@@ -171,7 +212,39 @@ app.get('/api/manager/approvals', authMiddleware, requireManager, async (req, re
         res.json(pendingEntries.rows);
     } catch (err) {
         console.error(err.message);
-        res.status(500).send('Server error');
+        res.status(500).json({ msg: 'Server error' });
+    }
+});
+
+/**
+ * @route   GET /api/manager/entries
+ * @desc    Get all timesheet entries for employees of the logged-in manager
+ * @access  Private (Manager only)
+ */
+app.get('/api/manager/entries', authMiddleware, requireManager, async (req, res) => {
+    try {
+        const { status } = req.query; // Optional filter by status
+        let query = `
+            SELECT t.*, u.full_name AS employee_name,
+                   EXTRACT(EPOCH FROM (t.end_time - t.start_time)) / 3600 AS duration_hours
+            FROM timesheet t
+            JOIN users u ON t.user_id = u.id
+            WHERE u.manager_id = $1
+        `;
+        let params = [req.user.id];
+        
+        if (status && status !== 'all') {
+            query += ` AND t.status = $2`;
+            params.push(status);
+        }
+        
+        query += ` ORDER BY t.entry_date DESC, t.created_at DESC`;
+        
+        const entries = await pool.query(query, params);
+        res.json(entries.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server error' });
     }
 });
 
@@ -203,7 +276,7 @@ app.put('/api/manager/approve/:id', authMiddleware, requireManager, async (req, 
 
     } catch (err) {
         console.error(err.message);
-        res.status(500).send('Server error');
+        res.status(500).json({ msg: 'Server error' });
     }
 });
 

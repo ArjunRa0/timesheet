@@ -34,3 +34,7 @@ INSERT INTO users (email, password, full_name, role) VALUES
 ('admin@company.com', '$2b$10$W0vWZCLf2lVpQdBuoCQAsuYDzh13wSWnHIWrWIU04aQnsdwyY..fi', 'Admin User', 'manager'),
 ('john.doe@company.com', '$2b$10$W0vWZCLf2lVpQdBuoCQAsuYDzh13wSWnHIWrWIU04aQnsdwyY..fi', 'John Doe', 'employee'),
 ('jane.smith@company.com', '$2b$10$W0vWZCLf2lVpQdBuoCQAsuYDzh13wSWnHIWrWIU04aQnsdwyY..fi', 'Jane Smith', 'employee');
+
+-- Update employees to be managed by the admin user
+UPDATE users SET manager_id = (SELECT id FROM users WHERE email = 'admin@company.com') 
+WHERE email IN ('john.doe@company.com', 'jane.smith@company.com');
